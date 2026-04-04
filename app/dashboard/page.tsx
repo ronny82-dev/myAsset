@@ -9,6 +9,7 @@ interface Asset {
   name: string;
   type: 'CASH' | 'BANK' | 'CARD' | 'INVESTMENT';
   balance: number;
+  is_active?: boolean;
 }
 
 interface CategoryStat {
@@ -66,7 +67,7 @@ export default function DashboardPage() {
       const endDate = new Date(y, m, 0, 23, 59, 59).toISOString();
 
       const [assetsRes, txRes] = await Promise.all([
-        supabase.from('assets').select('id, name, type, balance').eq('is_active', true),
+        supabase.from('assets').select('id, name, type, balance, is_active').eq('is_active', true),
         supabase
           .from('transactions')
           .select('amount, type, transacted_at, categories(name), users(nickname)')
@@ -154,7 +155,7 @@ export default function DashboardPage() {
             <div className="py-6 text-center text-gray-400 text-sm">불러오는 중...</div>
           ) : (
             <div className="divide-y divide-gray-50">
-              {assets.filter((a) => a.is_active).map((asset) => (
+              {assets.map((asset) => (
                 <div key={asset.id} className="flex items-center justify-between px-4 py-3">
                   <div className="flex items-center gap-3">
                     <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${ASSET_TYPE_COLOR[asset.type]}`}>
