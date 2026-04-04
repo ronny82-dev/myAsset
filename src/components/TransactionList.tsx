@@ -57,7 +57,7 @@ export default function TransactionList() {
     }
 
     const { data, error } = await query.limit(200);
-    if (!error && data) setTransactions(data as Transaction[]);
+    if (!error && data) setTransactions(data as unknown as Transaction[]);
     setLoading(false);
   };
 
