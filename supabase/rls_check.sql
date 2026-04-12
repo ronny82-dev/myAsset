@@ -63,7 +63,7 @@ LANGUAGE sql
 SECURITY DEFINER
 STABLE
 AS $$
-  SELECT public.my_group_ids()
+  SELECT group_id FROM public.group_members WHERE user_id = auth.uid()
 $$;
 
 -- ────────────────────────────────
@@ -117,8 +117,8 @@ DROP POLICY IF EXISTS "group_members: 내 그룹 멤버 조회" ON public.group_
 CREATE POLICY "group_members: 내 그룹 멤버 조회"
   ON public.group_members FOR SELECT
   USING (
-    -- my_group_ids()는 SECURITY DEFINER 함수로 RLS 없이 실행 → 무한재귀 방지
-    group_id IN (SELECT public.my_group_ids())
+    -- 자기 자신의 멤버십 row만 직접 조건 체크 (서브쿼리/함수 참조 없음 → 재귀 원천 차단)
+    user_id = auth.uid()
   );
 
 DROP POLICY IF EXISTS "group_members: 본인 삽입" ON public.group_members;

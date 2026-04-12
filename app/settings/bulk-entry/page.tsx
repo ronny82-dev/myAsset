@@ -70,6 +70,10 @@ export default function BulkEntryPage() {
   const [result, setResult] = useState<{ success: number; fail: number } | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
 
+  // 자산/카테고리 셀 내부 클립보드
+  const [copiedAssetId, setCopiedAssetId] = useState<string | null>(null);
+  const [copiedCategoryId, setCopiedCategoryId] = useState<string | null>(null);
+
   // 자산 선택 모달
   const [assetPickerOpen, setAssetPickerOpen] = useState(false);
   const [pendingAction, setPendingAction] = useState<'excel' | 'image' | null>(null);
@@ -143,6 +147,88 @@ export default function BulkEntryPage() {
       }
       return r;
     }));
+  };
+
+  // 키워드 → 카테고리 힌트 매핑 (적요 기반 추론용)
+  const KEYWORD_HINTS: { keywords: string[]; hints: string[] }[] = [
+    { keywords: ['식당', '음식', '밥', '점심', '저녁', '아침', '식사', '배달', '치킨', '피자', '햄버거', '분식', '라면', '고기', '삼겹살', '갈비', '초밥', '스시', '파스타', '샐러드', '도시락', '떡볶이', '순대', '족발', '보쌈', '냉면', '국밥', '설렁탕', '국수', '쌀국수', '마라탕', '찜닭', '곱창'], hints: ['식비', '외식'] },
+    { keywords: ['카페', '커피', '스타벅스', '투썸', '이디야', '할리스', '빽다방', '아메리카노', '라떼', '디저트', '케이크', '베이커리', '빵'], hints: ['카페', '식비', '간식'] },
+    { keywords: ['편의점', 'cu', 'gs25', '세븐일레븐', 'gs 25', '이마트24', '미니스톱'], hints: ['편의점', '식비'] },
+    { keywords: ['마트', '슈퍼', '이마트', '홈플러스', '롯데마트', '코스트코', '하나로', '식재료', '야채', '과일', '정육'], hints: ['마트', '식비', '식재료', '생필품'] },
+    { keywords: ['버스', '지하철', '택시', '카카오택시', '우티', '주유', '고속도로', '톨게이트', '기차', 'ktx', '고속버스', 't머니', '교통카드', '주차', '세차', '하이패스'], hints: ['교통', '주유'] },
+    { keywords: ['영화', '넷플릭스', '왓챠', '티빙', '웨이브', '디즈니', '게임', '콘서트', '공연', '전시', '박물관', '놀이공원', '볼링', '노래방', '탈출방', '스크린', '독서실'], hints: ['문화', '여가', '취미', '오락'] },
+    { keywords: ['여행', '호텔', '숙박', '펜션', '에어비앤비', '항공', '비행기', '리조트', '관광', '투어'], hints: ['여행', '숙박'] },
+    { keywords: ['운동', '헬스', '수영', '골프', '테니스', '필라테스', '요가', '스포츠', '등산', '자전거', '런닝'], hints: ['운동', '여가', '건강'] },
+    { keywords: ['병원', '약국', '의원', '치과', '한의원', '안과', '피부과', '정형외과', '산부인과', '소아과', '약', '의약품', '검진', '건강검진', '수술', '입원'], hints: ['의료', '건강', '병원'] },
+    { keywords: ['학원', '수업', '강의', '과외', '학습지', '인강', '교재', '유치원', '어린이집', '등록금', '수강료', '입시'], hints: ['교육', '학원'] },
+    { keywords: ['책', '도서', '교재', '문제집', '알라딘', 'yes24', '교보문고', '영풍문고'], hints: ['도서', '교육'] },
+    { keywords: ['쿠팡', '11번가', '지마켓', '옥션', '위메프', '티몬', '네이버쇼핑', '백화점', '아울렛', '면세점', '온라인쇼핑', '인터넷쇼핑'], hints: ['쇼핑'] },
+    { keywords: ['옷', '의류', '신발', '가방', '액세서리', '주얼리', '시계', '안경', '패션', '유니폼', '코트', '자켓'], hints: ['의류', '패션', '쇼핑'] },
+    { keywords: ['화장품', '향수', '미용', '헤어', '네일', '뷰티', '피부', '에스테틱', '왁싱', '아이브로우'], hints: ['뷰티', '미용', '쇼핑'] },
+    { keywords: ['월세', '전세', '관리비', '청소', '인테리어', '가구', '가전', '이사', '수리', '수선', '도배', '장판'], hints: ['주거', '집'] },
+    { keywords: ['통신', '핸드폰', '휴대폰', '인터넷', '요금', 'kt', 'skt', 'lg유플러스', '알뜰폰', '데이터', '통화'], hints: ['통신', '통신비'] },
+    { keywords: ['전기', '가스', '수도', '도시가스', '한전', '공과금', '관리비'], hints: ['공과금', '주거'] },
+    { keywords: ['보험', '생명보험', '실손', '자동차보험', '화재보험', '연금', '보험료'], hints: ['보험'] },
+    { keywords: ['적금', '저축', '펀드', '주식', '투자', '코인', '가상화폐', '비트코인', '증권'], hints: ['저축', '투자'] },
+    { keywords: ['대출', '이자', '원금', '상환', '할부'], hints: ['대출'] },
+    { keywords: ['결혼', '축의금', '부의금', '조의금', '장례', '경조사', '돌잔치'], hints: ['경조사'] },
+    { keywords: ['선물', '생일', '기념일', '크리스마스', '명절', '설날', '추석', '어버이날'], hints: ['선물', '경조사'] },
+    { keywords: ['반려동물', '강아지', '고양이', '펫', '동물병원', '사료', '간식'], hints: ['반려동물', '펫'] },
+    { keywords: ['급여', '월급', '보너스', '상여금', '성과급', '연봉', '임금', '페이'], hints: ['급여'] },
+    { keywords: ['용돈', '용돈받음', '부모님', '지원금'], hints: ['용돈'] },
+    { keywords: ['이자수익', '배당', '임대', '렌탈', '수익', '판매수익', '부업'], hints: ['부수입'] },
+    { keywords: ['환급', '환불', '캐시백', '리워드', '포인트', '적립'], hints: ['환급'] },
+  ];
+
+  // 적요를 기반으로 카테고리 자동 추론 (키워드 매핑 우선 → 문자열 유사도 보완)
+  const guessCategory = (description: string, type: 'EXPENSE' | 'INCOME'): string => {
+    if (!description.trim()) return '';
+    const opts = categoryOptions(type);
+    if (opts.length === 0) return '';
+
+    const desc = description.toLowerCase().replace(/\s+/g, '');
+
+    // 1단계: 키워드 매칭으로 힌트 점수 수집
+    const hintScores: Record<string, number> = {};
+    for (const { keywords, hints } of KEYWORD_HINTS) {
+      for (const kw of keywords) {
+        if (desc.includes(kw.toLowerCase().replace(/\s+/g, ''))) {
+          for (const hint of hints) {
+            hintScores[hint] = (hintScores[hint] ?? 0) + 1;
+          }
+        }
+      }
+    }
+
+    // 2단계: 힌트 점수를 카테고리 옵션과 매칭
+    let best = { id: '', score: 0 };
+    for (const opt of opts) {
+      const parts = opt.label.split('›').map((s) => s.trim().toLowerCase().replace(/\s+/g, ''));
+      let score = 0;
+
+      // 힌트 점수 반영 (가중치 높음)
+      for (const [hint, hintScore] of Object.entries(hintScores)) {
+        for (const part of parts) {
+          if (part.includes(hint.toLowerCase()) || hint.toLowerCase().includes(part)) {
+            score += hintScore * 3;
+          }
+        }
+      }
+
+      // 직접 포함 관계 (fallback)
+      for (const part of parts) {
+        if (!part) continue;
+        if (desc.includes(part) || part.includes(desc)) {
+          score += 2;
+        } else {
+          score += strSimilarity(desc, part);
+        }
+      }
+
+      if (score > best.score) best = { id: opt.id, score };
+    }
+
+    return best.score > 1 ? best.id : '';
   };
 
   // 동일한 오류 텍스트를 가진 다른 행들도 일괄 업데이트하는 핸들러 (카테고리)
@@ -286,7 +372,7 @@ export default function BulkEntryPage() {
       reader.onload = (evt) => {
         const data = evt.target?.result;
         // cellDates 옵션 제거 → 날짜 셀을 raw 시리얼 숫자로 받아 timezone 없이 직접 파싱
-        const wb = XLSX.read(data, { type: 'binary' });
+        const wb = XLSX.read(data, { type: 'array' });
         const ws = wb.Sheets[wb.SheetNames[0]];
         const rowsData = XLSX.utils.sheet_to_json<any>(ws, { raw: true });
 
@@ -346,9 +432,9 @@ export default function BulkEntryPage() {
             transactedAt: parseExcelDate(r['거래일(YYYY-MM-DD)']),
             type,
             description: r['적요'] || '',
-            amount: r['금액'] ? String(r['금액']).replace(/[^0-9]/g, '') : '',
+            amount: r['금액'] ? (() => { const n = Number(String(r['금액']).replace(/[^0-9]/g, '')); return n ? n.toLocaleString('ko-KR') : ''; })() : '',
             assetId: matchedAsset ? matchedAsset.id : '',
-            categoryId: matchedCat ? matchedCat.id : '',
+            categoryId: matchedCat ? matchedCat.id : guessCategory(r['적요'] || '', type),
             invalidAsset: !matchedAsset && excelAssetName && !pickedAssetId ? String(excelAssetName) : undefined,
             invalidCategory: !matchedCat && rawCatName ? String(rawCatName) : undefined,
             fuzzyAsset: fuzzyAssetOriginal,
@@ -359,7 +445,7 @@ export default function BulkEntryPage() {
         if (newRows.length > 0) setRows(newRows);
         if (fileInputRef.current) fileInputRef.current.value = '';
       };
-      reader.readAsBinaryString(file);
+      reader.readAsArrayBuffer(file);
     } catch (e) {
       alert('엑셀 파일을 처리하는 중 오류가 발생했습니다. (xlsx 패키지 설치 확인)');
     }
@@ -399,14 +485,14 @@ export default function BulkEntryPage() {
         return;
       }
 
-      const newRows: Row[] = (data.transactions ?? []).map((t: any) => makeRow({
-        transactedAt: t.transactedAt || today,
-        type: t.type === 'INCOME' ? 'INCOME' : 'EXPENSE',
-        description: t.description || '',
-        amount: t.amount != null ? Number(t.amount).toLocaleString('ko-KR') : '',
-        assetId: pickedAssetId || '',
-        categoryId: t.categoryId != null ? String(t.categoryId) : '',
-      }));
+      const newRows: Row[] = (data.transactions ?? []).map((t: any) => {
+        const type: 'EXPENSE' | 'INCOME' = t.type === 'INCOME' ? 'INCOME' : 'EXPENSE';
+        const description: string = t.description || '';
+        const categoryId = t.categoryId != null
+          ? String(t.categoryId)
+          : guessCategory(description, type);
+        return makeRow({ transactedAt: t.transactedAt || today, type, description, amount: t.amount != null ? Number(t.amount).toLocaleString('ko-KR') : '', assetId: pickedAssetId || '', categoryId });
+      });
 
       if (newRows.length > 0) {
         setRows(newRows);
@@ -506,15 +592,15 @@ export default function BulkEntryPage() {
 
         {/* 테이블 */}
         <div ref={tableRef} className="overflow-x-auto rounded-2xl border border-gray-200 bg-white shadow-sm">
-          <table className="w-full text-sm border-collapse min-w-[900px]">
+          <table className="w-full text-sm border-collapse min-w-[1100px]">
             <thead>
               <tr className="bg-gray-50 text-xs text-gray-500 font-semibold">
                 <th className="px-3 py-2.5 text-left border-b border-gray-200 w-32">거래일</th>
                 <th className="px-3 py-2.5 text-left border-b border-gray-200 w-20">유형</th>
-                <th className="px-3 py-2.5 text-left border-b border-gray-200">적요</th>
+                <th className="px-3 py-2.5 text-left border-b border-gray-200 w-48">적요</th>
                 <th className="px-3 py-2.5 text-right border-b border-gray-200 w-32">금액 (원)</th>
-                <th className="px-3 py-2.5 text-left border-b border-gray-200 w-36">자산/계좌</th>
-                <th className="px-3 py-2.5 text-left border-b border-gray-200 w-44">카테고리</th>
+                <th className="px-3 py-2.5 text-left border-b border-gray-200 w-56">자산/계좌</th>
+                <th className="px-3 py-2.5 text-left border-b border-gray-200 w-64">카테고리</th>
                 <th className="px-2 py-2.5 border-b border-gray-200 w-8" />
               </tr>
             </thead>
@@ -524,10 +610,10 @@ export default function BulkEntryPage() {
                 const isLast = idx === rows.length - 1;
                 const cellCls = 'px-1 py-1 border-b border-gray-100';
                 const inputCls = 'w-full px-2 py-1.5 rounded-lg border border-transparent bg-transparent hover:bg-gray-50 focus:bg-white focus:border-blue-400 focus:outline-none text-gray-800 text-sm transition-colors';
-                const selectCls = inputCls + ' cursor-pointer';
+                const selectCls = inputCls + ' cursor-pointer truncate';
 
                 return (
-                  <tr key={row._id} className={row.amount ? 'bg-blue-50/30' : 'hover:bg-gray-50/50'}>
+                  <tr key={row._id} className={`transition-colors hover:bg-sky-50 ${row.amount ? 'bg-blue-50/40' : idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/60'}`}>
                     {/* 거래일 */}
                     <td className={cellCls}>
                       <input
@@ -578,7 +664,17 @@ export default function BulkEntryPage() {
                         value={row.assetId}
                         onChange={(e) => handleAssetChange(row._id, e.target.value, row.invalidAsset)}
                         title={row.fuzzyAsset ? `엑셀 원본값: ${row.fuzzyAsset}` : undefined}
-                        className={`${selectCls} ${row.invalidAsset ? '!border-red-400 !bg-red-50 !text-red-600' : row.fuzzyAsset ? '!border-amber-400 !bg-amber-50' : ''}`}
+                        className={`${selectCls} ${row.invalidAsset ? '!border-red-400 !bg-red-50 !text-red-600' : row.fuzzyAsset ? '!border-amber-400 !bg-amber-50' : ''} ${copiedAssetId !== null ? 'ring-1 ring-inset ring-blue-300' : ''}`}
+                        onKeyDown={(e) => {
+                          if (e.ctrlKey && e.key === 'c') {
+                            e.preventDefault();
+                            setCopiedAssetId(row.assetId);
+                            toast.success('자산 복사됨 (Ctrl+V로 붙여넣기)', { duration: 1200 });
+                          } else if (e.ctrlKey && e.key === 'v' && copiedAssetId !== null) {
+                            e.preventDefault();
+                            handleAssetChange(row._id, copiedAssetId, row.invalidAsset);
+                          }
+                        }}
                       >
                         <option value="">{row.invalidAsset ? `(오류) ${row.invalidAsset}` : '-'}</option>
                         {assets.map((a) => (
@@ -597,7 +693,17 @@ export default function BulkEntryPage() {
                         value={row.categoryId}
                         onChange={(e) => handleCategoryChange(row._id, e.target.value, row.invalidCategory)}
                         title={row.fuzzyCategory ? `엑셀 원본값: ${row.fuzzyCategory}` : undefined}
-                        className={`${selectCls} ${row.invalidCategory ? '!border-red-400 !bg-red-50 !text-red-600' : row.fuzzyCategory ? '!border-amber-400 !bg-amber-50' : ''}`}
+                        className={`${selectCls} ${row.invalidCategory ? '!border-red-400 !bg-red-50 !text-red-600' : row.fuzzyCategory ? '!border-amber-400 !bg-amber-50' : ''} ${copiedCategoryId !== null ? 'ring-1 ring-inset ring-blue-300' : ''}`}
+                        onKeyDown={(e) => {
+                          if (e.ctrlKey && e.key === 'c') {
+                            e.preventDefault();
+                            setCopiedCategoryId(row.categoryId);
+                            toast.success('카테고리 복사됨 (Ctrl+V로 붙여넣기)', { duration: 1200 });
+                          } else if (e.ctrlKey && e.key === 'v' && copiedCategoryId !== null) {
+                            e.preventDefault();
+                            handleCategoryChange(row._id, copiedCategoryId, row.invalidCategory);
+                          }
+                        }}
                       >
                         <option value="">{row.invalidCategory ? `(오류) ${row.invalidCategory}` : '-'}</option>
                         {catOptions.map((c) => (

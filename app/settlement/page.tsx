@@ -89,7 +89,7 @@ const toLocalStr = (d: Date) =>
 
 export default function SettlementPage() {
   const router = useRouter();
-  const { currentUser } = useGroup();
+  const { currentUser, group } = useGroup();
   const detailRef = useRef<HTMLDivElement>(null);
 
   const now = new Date();
@@ -299,6 +299,7 @@ export default function SettlementPage() {
         asset_id: cd.linked_asset_id,
         category_id: subCat!.id,
         user_id: currentUser.id,
+        group_id: group?.id ?? null,
         transacted_at: settlementDateIso,
         description: `${selectedCard.name} ${year}년 ${month}월 정산`,
         is_deleted: false,

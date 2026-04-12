@@ -6,9 +6,11 @@ import toast from 'react-hot-toast'; // toast import
 import type { Asset, Category } from '@/components/ExpenseForm';
 import { supabase } from '@/utils/supabase';
 import { invalidateFrom } from '@/utils/monthlyBalance';
+import { useGroup } from '@/context/GroupContext';
 
 export default function Home() {
   const router = useRouter();
+  const { group } = useGroup();
   const [assets, setAssets] = useState<Asset[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
@@ -104,6 +106,7 @@ export default function Home() {
       const base = {
         category_id: data.selectedCategory.id,
         user_id: userId,
+        group_id: group?.id ?? null,
         transacted_at: transactedAtIso,
         description: data.description || null,
         amount: numericAmount,
@@ -136,6 +139,7 @@ export default function Home() {
       asset_id: data.selectedAsset.id,
       category_id: data.selectedCategory.id,
       user_id: userId,
+      group_id: group?.id ?? null,
       transacted_at: transactedAtIso,
       expected_billing_at: data.type === 'EXPENSE' && data.billingDate
         ? data.billingDate.toISOString().split('T')[0]
