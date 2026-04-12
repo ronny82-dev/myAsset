@@ -25,7 +25,7 @@ interface Transaction {
   transacted_at: string;
   description: string | null;
   category_id: number | null;
-  users: { nickname: string } | null;
+  users: { nickname: string }[] | null;
 }
 
 const ASSET_TYPE_LABEL: Record<string, string> = {
@@ -219,7 +219,7 @@ export default function AssetDetailPage() {
                           </p>
                           <p className="text-xs text-gray-400 truncate">
                             {getCategoryLabel(tx.category_id)}
-                            {tx.users?.nickname && ` · ${tx.users.nickname}`}
+                            {tx.users?.[0]?.nickname && ` · ${tx.users[0].nickname}`}
                           </p>
                         </div>
                       </div>
