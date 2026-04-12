@@ -53,8 +53,18 @@ ALTER TABLE public.asset_monthly_balances ENABLE ROW LEVEL SECURITY;
 --    내 그룹(group_id) 소속 데이터만 읽기/쓰기 허용
 -- ============================================================
 
--- 헬퍼: 현재 사용자의 group_id 목록 반환 (멤버로 소속된 그룹)
--- (정책 안에서 서브쿼리로 사용)
+-- ────────────────────────────────────────────────────────────
+-- 헬퍼 함수: 현재 사용자의 group_id 목록 반환
+-- SECURITY DEFINER로 RLS를 우회해 group_members 무한재귀 방지
+-- ────────────────────────────────────────────────────────────
+CREATE OR REPLACE FUNCTION public.my_group_ids()
+RETURNS SETOF uuid
+LANGUAGE sql
+SECURITY DEFINER
+STABLE
+AS $$
+  SELECT public.my_group_ids()
+$$;
 
 -- ────────────────────────────────
 -- users 테이블: 본인 row만 접근
@@ -78,7 +88,7 @@ CREATE POLICY "users: 같은 그룹 멤버 조회"
     id IN (
       SELECT gm.user_id FROM public.group_members gm
       WHERE gm.group_id IN (
-        SELECT group_id FROM public.group_members WHERE user_id = auth.uid()
+        SELECT public.my_group_ids()
       )
     )
   );
@@ -91,7 +101,7 @@ CREATE POLICY "groups: 내 그룹만 조회"
   ON public.groups FOR SELECT
   USING (
     id IN (
-      SELECT group_id FROM public.group_members WHERE user_id = auth.uid()
+      SELECT public.my_group_ids()
     )
   );
 
@@ -107,9 +117,8 @@ DROP POLICY IF EXISTS "group_members: 내 그룹 멤버 조회" ON public.group_
 CREATE POLICY "group_members: 내 그룹 멤버 조회"
   ON public.group_members FOR SELECT
   USING (
-    group_id IN (
-      SELECT group_id FROM public.group_members WHERE user_id = auth.uid()
-    )
+    -- my_group_ids()는 SECURITY DEFINER 함수로 RLS 없이 실행 → 무한재귀 방지
+    group_id IN (SELECT public.my_group_ids())
   );
 
 DROP POLICY IF EXISTS "group_members: 본인 삽입" ON public.group_members;
@@ -133,7 +142,7 @@ CREATE POLICY "group_invitations: 내 그룹에만 생성"
   ON public.group_invitations FOR INSERT
   WITH CHECK (
     group_id IN (
-      SELECT group_id FROM public.group_members WHERE user_id = auth.uid()
+      SELECT public.my_group_ids()
     )
   );
 
@@ -151,7 +160,7 @@ CREATE POLICY "assets: 내 그룹만 조회"
   ON public.assets FOR SELECT
   USING (
     group_id IN (
-      SELECT group_id FROM public.group_members WHERE user_id = auth.uid()
+      SELECT public.my_group_ids()
     )
   );
 
@@ -160,7 +169,7 @@ CREATE POLICY "assets: 내 그룹에만 생성"
   ON public.assets FOR INSERT
   WITH CHECK (
     group_id IN (
-      SELECT group_id FROM public.group_members WHERE user_id = auth.uid()
+      SELECT public.my_group_ids()
     )
   );
 
@@ -169,7 +178,7 @@ CREATE POLICY "assets: 내 그룹만 수정"
   ON public.assets FOR UPDATE
   USING (
     group_id IN (
-      SELECT group_id FROM public.group_members WHERE user_id = auth.uid()
+      SELECT public.my_group_ids()
     )
   );
 
@@ -178,7 +187,7 @@ CREATE POLICY "assets: 내 그룹만 삭제"
   ON public.assets FOR DELETE
   USING (
     group_id IN (
-      SELECT group_id FROM public.group_members WHERE user_id = auth.uid()
+      SELECT public.my_group_ids()
     )
   );
 
@@ -192,7 +201,7 @@ CREATE POLICY "card_details: 내 그룹 자산의 카드 상세만 접근"
     asset_id IN (
       SELECT id FROM public.assets
       WHERE group_id IN (
-        SELECT group_id FROM public.group_members WHERE user_id = auth.uid()
+        SELECT public.my_group_ids()
       )
     )
   )
@@ -200,7 +209,7 @@ CREATE POLICY "card_details: 내 그룹 자산의 카드 상세만 접근"
     asset_id IN (
       SELECT id FROM public.assets
       WHERE group_id IN (
-        SELECT group_id FROM public.group_members WHERE user_id = auth.uid()
+        SELECT public.my_group_ids()
       )
     )
   );
@@ -214,7 +223,7 @@ CREATE POLICY "categories: 내 그룹 또는 시스템 카테고리 조회"
   USING (
     group_id IS NULL  -- 시스템 공통 카테고리
     OR group_id IN (
-      SELECT group_id FROM public.group_members WHERE user_id = auth.uid()
+      SELECT public.my_group_ids()
     )
   );
 
@@ -223,7 +232,7 @@ CREATE POLICY "categories: 내 그룹에만 생성"
   ON public.categories FOR INSERT
   WITH CHECK (
     group_id IN (
-      SELECT group_id FROM public.group_members WHERE user_id = auth.uid()
+      SELECT public.my_group_ids()
     )
   );
 
@@ -232,7 +241,7 @@ CREATE POLICY "categories: 내 그룹만 수정/삭제"
   ON public.categories FOR UPDATE
   USING (
     group_id IN (
-      SELECT group_id FROM public.group_members WHERE user_id = auth.uid()
+      SELECT public.my_group_ids()
     )
   );
 
@@ -244,7 +253,7 @@ CREATE POLICY "transactions: 내 그룹만 조회"
   ON public.transactions FOR SELECT
   USING (
     group_id IN (
-      SELECT group_id FROM public.group_members WHERE user_id = auth.uid()
+      SELECT public.my_group_ids()
     )
   );
 
@@ -253,7 +262,7 @@ CREATE POLICY "transactions: 내 그룹에만 생성"
   ON public.transactions FOR INSERT
   WITH CHECK (
     group_id IN (
-      SELECT group_id FROM public.group_members WHERE user_id = auth.uid()
+      SELECT public.my_group_ids()
     )
   );
 
@@ -262,7 +271,7 @@ CREATE POLICY "transactions: 내 그룹만 수정"
   ON public.transactions FOR UPDATE
   USING (
     group_id IN (
-      SELECT group_id FROM public.group_members WHERE user_id = auth.uid()
+      SELECT public.my_group_ids()
     )
   );
 
@@ -271,7 +280,7 @@ CREATE POLICY "transactions: 내 그룹만 삭제"
   ON public.transactions FOR DELETE
   USING (
     group_id IN (
-      SELECT group_id FROM public.group_members WHERE user_id = auth.uid()
+      SELECT public.my_group_ids()
     )
   );
 
@@ -285,7 +294,7 @@ CREATE POLICY "asset_monthly_balances: 내 그룹 자산만 접근"
     asset_id IN (
       SELECT id FROM public.assets
       WHERE group_id IN (
-        SELECT group_id FROM public.group_members WHERE user_id = auth.uid()
+        SELECT public.my_group_ids()
       )
     )
   )
@@ -293,7 +302,7 @@ CREATE POLICY "asset_monthly_balances: 내 그룹 자산만 접근"
     asset_id IN (
       SELECT id FROM public.assets
       WHERE group_id IN (
-        SELECT group_id FROM public.group_members WHERE user_id = auth.uid()
+        SELECT public.my_group_ids()
       )
     )
   );
@@ -306,12 +315,12 @@ CREATE POLICY "asset_monthly_balances: 내 그룹 자산만 접근"
 --   ON public.settlements FOR ALL
 --   USING (
 --     group_id IN (
---       SELECT group_id FROM public.group_members WHERE user_id = auth.uid()
+--       SELECT public.my_group_ids()
 --     )
 --   )
 --   WITH CHECK (
 --     group_id IN (
---       SELECT group_id FROM public.group_members WHERE user_id = auth.uid()
+--       SELECT public.my_group_ids()
 --     )
 --   );
 
