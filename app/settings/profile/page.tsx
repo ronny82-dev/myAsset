@@ -3,8 +3,11 @@ import { useState } from 'react';
 import { supabase } from '@/utils/supabase';
 import { useGroup } from '@/context/GroupContext';
 
+const CODE_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
 function generateCode(): string {
-  return Math.random().toString(36).substring(2, 8).toUpperCase();
+  const array = new Uint8Array(6);
+  crypto.getRandomValues(array);
+  return Array.from(array, (b) => CODE_CHARS[b % CODE_CHARS.length]).join('');
 }
 
 export default function ProfilePage() {

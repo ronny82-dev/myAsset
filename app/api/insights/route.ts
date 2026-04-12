@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { AzureOpenAI } from 'openai';
-import { createServerClient } from '@supabase/auth-helpers-nextjs';
-import { cookies } from 'next/headers';
+import { requireAuth } from '@/utils/supabase-server';
+import { createSupabaseServer } from '@/utils/supabase-server';
 
 const openai = new AzureOpenAI({
   apiKey: process.env.AZURE_OPENAI_API_KEY,
@@ -11,28 +11,25 @@ const openai = new AzureOpenAI({
 });
 
 export async function POST(req: NextRequest) {
-  const cookieStore = await cookies();
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll: () => cookieStore.getAll(),
-        setAll: () => {},
-      },
-    }
-  );
+  // 인증 + 그룹 확인
+  const auth = await requireAuth();
+  if (auth.error) return auth.error;
 
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const { groupId } = auth;
+  if (!groupId) {
+    return NextResponse.json({ error: '그룹에 참여 후 이용할 수 있습니다.' }, { status: 403 });
+  }
 
-  // 최근 3개월 지출 데이터 집계
+  const supabase = await createSupabaseServer();
+
+  // 최근 3개월 지출 데이터 집계 (본인 그룹 데이터만)
   const threeMonthsAgo = new Date();
   threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
 
   const { data: txData } = await supabase
     .from('transactions')
     .select('amount, type, transacted_at, categories(name), users(nickname)')
+    .eq('group_id', groupId)
     .gte('transacted_at', threeMonthsAgo.toISOString())
     .eq('is_deleted', false)
     .eq('type', 'EXPENSE');
@@ -72,12 +69,17 @@ ${JSON.stringify(memberSummary, null, 2)}
 
 각 항목은 이모지를 활용하여 읽기 쉽게 작성해주세요. 전체 500자 이내로 간결하게.`;
 
-  const response = await openai.chat.completions.create({
-    model: process.env.AZURE_OPENAI_DEPLOYMENT_NAME!,
-    max_tokens: 1024,
-    messages: [{ role: 'user', content: prompt }],
-  });
+  try {
+    const response = await openai.chat.completions.create({
+      model: process.env.AZURE_OPENAI_DEPLOYMENT_NAME!,
+      max_tokens: 1024,
+      messages: [{ role: 'user', content: prompt }],
+    });
 
-  const insight = response.choices[0].message.content ?? '';
-  return NextResponse.json({ insight });
+    const insight = response.choices[0].message.content ?? '';
+    return NextResponse.json({ insight });
+  } catch (e) {
+    console.error('insights error:', e instanceof Error ? e.message : String(e));
+    return NextResponse.json({ error: 'AI 분석에 실패했습니다. 다시 시도해주세요.' }, { status: 500 });
+  }
 }

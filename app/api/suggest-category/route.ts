@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { AzureOpenAI } from 'openai';
+import { requireAuth } from '@/utils/supabase-server';
 
 interface SubCategory { id: string | number; name: string; }
 interface CategoryTree { id: string | number; name: string; subCategories: SubCategory[]; }
@@ -7,6 +8,10 @@ interface CategoryTree { id: string | number; name: string; subCategories: SubCa
 const EMPTY = { categoryId: null, categoryName: null, parentId: null, parentName: null, isNew: false };
 
 export async function POST(req: NextRequest) {
+  // 인증 확인
+  const auth = await requireAuth();
+  if (auth.error) return auth.error;
+
   const { description, transactionType, categories } = await req.json() as {
     description: string;
     transactionType: 'EXPENSE' | 'INCOME';
@@ -65,7 +70,6 @@ JSON 응답:
 
     const result = JSON.parse(response.choices[0].message.content ?? '{}');
 
-    // parentIndex 검증 (1-based, 범위 초과 시 거부)
     const parentIndex = Number(result.parentIndex);
     if (!Number.isInteger(parentIndex) || parentIndex < 1 || parentIndex > categories.length) {
       return NextResponse.json(EMPTY);
@@ -74,7 +78,6 @@ JSON 응답:
     const parent = categories[parentIndex - 1];
 
     if (result.existingSubId != null) {
-      // 기존 소분류: 해당 parent 안에서 탐색
       const sub = parent.subCategories.find((s) => String(s.id) === String(result.existingSubId));
       if (!sub) return NextResponse.json(EMPTY);
       return NextResponse.json({
@@ -88,7 +91,6 @@ JSON 응답:
 
     if (result.newSubName) {
       const subName = String(result.newSubName).trim();
-      // 소분류 이름이 대분류 이름과 같으면 잘못된 분류 → 폐기
       if (subName === parent.name.trim()) return NextResponse.json(EMPTY);
       return NextResponse.json({
         categoryId: null,
