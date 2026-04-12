@@ -3,14 +3,13 @@ import { AzureOpenAI } from 'openai';
 import { requireAuth } from '@/utils/supabase-server';
 import { createSupabaseServer } from '@/utils/supabase-server';
 
-const openai = new AzureOpenAI({
-  apiKey: process.env.AZURE_OPENAI_API_KEY,
-  endpoint: process.env.AZURE_OPENAI_ENDPOINT,
-  deployment: process.env.AZURE_OPENAI_DEPLOYMENT_NAME,
-  apiVersion: process.env.AZURE_OPENAI_API_VERSION ?? '2024-02-01',
-});
-
 export async function POST(req: NextRequest) {
+  const openai = new AzureOpenAI({
+    apiKey: process.env.AZURE_OPENAI_API_KEY,
+    endpoint: process.env.AZURE_OPENAI_ENDPOINT,
+    deployment: process.env.AZURE_OPENAI_DEPLOYMENT_NAME,
+    apiVersion: process.env.AZURE_OPENAI_API_VERSION ?? '2024-02-01',
+  });
   // 인증 + 그룹 확인
   const auth = await requireAuth();
   if (auth.error) return auth.error;
