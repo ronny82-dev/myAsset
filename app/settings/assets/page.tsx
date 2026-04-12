@@ -51,7 +51,7 @@ const LIABILITY_SECTION: AssetType[] = ['LOAN', 'OTHER_LIABILITY'];
 function AssetCard({ asset, onToggleActive, onBalanceChange }: {
   asset: Asset;
   onToggleActive: (asset: Asset) => void;
-  onBalanceChange: (asset: Asset, newInitialBalance: number) => void;
+  onBalanceChange: (asset: Asset, newInitialBalance: number) => Promise<void>;
 }) {
   const isLiability = LIABILITY_TYPES.includes(asset.type);
   const [inputVal, setInputVal] = useState(String(asset.initial_balance));
@@ -144,7 +144,7 @@ export default function AssetsPage() {
         .not('type', 'eq', 'CARD')
         .order('type')
         .order('name');
-      data = fallback.data;
+      data = fallback.data as any;
     }
 
     if (data) {
