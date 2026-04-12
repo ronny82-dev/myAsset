@@ -7,11 +7,16 @@ const PAGE_TITLES: Record<string, string> = {
   '/settings/categories': '카테고리 관리',
   '/settings/assets': '자산 관리',
   '/settings/assets/new': '자산 추가',
+  '/settings/cards': '카드 관리',
+  '/settings/cards/new': '카드 추가',
+  '/settings/bulk-entry': '일괄 입력',
+  '/settings/reset': '거래내역 초기화',
 };
 
 function getTitle(pathname: string): string {
   if (PAGE_TITLES[pathname]) return PAGE_TITLES[pathname];
   if (pathname.startsWith('/settings/assets/')) return '자산 편집';
+  if (pathname.startsWith('/settings/cards/')) return '카드 편집';
   return '설정';
 }
 
@@ -31,7 +36,9 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
         )}
         <h1 className="font-bold text-gray-800">{title}</h1>
       </header>
-      {children}
+      <div className="pb-16">
+        {children}
+      </div>
     </div>
   );
 }

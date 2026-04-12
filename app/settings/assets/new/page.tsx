@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/utils/supabase';
 import { useGroup } from '@/context/GroupContext';
-import AssetForm from '@/components/settings/AssetForm';
+import AssetForm, { type AssetFormValues } from '@/components/settings/AssetForm';
 
 export default function NewAssetPage() {
   const router = useRouter();
@@ -11,43 +11,32 @@ export default function NewAssetPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  const handleSave = async (values: {
-    name: string;
-    type: 'CASH' | 'BANK' | 'CARD' | 'INVESTMENT';
-    balance: number;
-    cardDetails?: {
-      card_type: 'CREDIT' | 'CHECK';
-      settlement_day: number;
-      billing_start_offset: number;
-      billing_end_offset: number;
-      linked_asset_id: string | null;
-    };
-  }) => {
+  const handleSave = async (values: AssetFormValues) => {
     setError('');
     setSaving(true);
     try {
       if (!currentUser) throw new Error('로그인이 필요합니다.');
-      const { data: asset, error: aErr } = await supabase
-        .from('assets')
-        .insert({
-          name: values.name,
-          type: values.type,
-          balance: values.type === 'CARD' ? 0 : values.balance,
-          user_id: currentUser.id,
-          group_id: group?.id ?? null,
-          is_active: true,
-        })
-        .select()
-        .single();
-      if (aErr) throw aErr;
 
-      if (values.type === 'CARD' && values.cardDetails) {
-        const { error: cdErr } = await supabase.from('card_details').insert({
-          asset_id: asset.id,
-          ...values.cardDetails,
-        });
-        if (cdErr) throw cdErr;
-      }
+      // 동일 이름 중복 확인
+      const { data: existing } = await supabase
+        .from('assets')
+        .select('id')
+        .eq('name', values.name.trim())
+        .eq('group_id', group?.id ?? null)
+        .limit(1)
+        .maybeSingle();
+      if (existing) throw new Error(`'${values.name.trim()}' 이름의 자산이 이미 존재합니다.`);
+
+      const { error: aErr } = await supabase.from('assets').insert({
+        name: values.name,
+        type: values.type,
+        initial_balance: values.initial_balance,
+        balance: values.initial_balance,
+        user_id: currentUser.id,
+        group_id: group?.id ?? null,
+        is_active: true,
+      });
+      if (aErr) throw aErr;
       router.push('/settings/assets');
     } catch (e: any) {
       setError(e.message);

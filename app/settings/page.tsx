@@ -43,7 +43,14 @@ export default function SettingsPage() {
       <div className="bg-white mx-4 rounded-2xl overflow-hidden shadow-sm border border-gray-100 divide-y divide-gray-50">
         <MenuItem href="/settings/profile" label="프로필 & 그룹" desc="닉네임 수정, 커플 초대코드" />
         <MenuItem href="/settings/categories" label="카테고리 관리" desc="지출·수입 카테고리 추가/수정" />
-        <MenuItem href="/settings/assets" label="자산 관리" desc="은행 계좌, 신용카드 등록" />
+        <MenuItem href="/settings/assets" label="자산 관리" desc="현금·은행계좌·투자·부채 등록" />
+        <MenuItem href="/settings/cards" label="카드 관리" desc="신용카드·체크카드 등록 및 결제일 설정" />
+      </div>
+
+      {/* 데이터 관리 */}
+      <div className="bg-white mx-4 rounded-2xl overflow-hidden shadow-sm border border-gray-100 divide-y divide-gray-50">
+        <MenuItem href="/settings/bulk-entry" label="일괄 입력" desc="여러 거래내역을 한 번에 입력 (PC 전용)" />
+        <MenuItem href="/settings/reset" label="거래내역 초기화" desc="모든 거래내역을 삭제합니다" />
       </div>
 
       {/* 로그아웃 */}

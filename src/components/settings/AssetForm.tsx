@@ -1,43 +1,53 @@
 'use client';
-import { useState, useEffect } from 'react';
-import { supabase } from '@/utils/supabase';
+import { useState } from 'react';
 
-type AssetType = 'CASH' | 'BANK' | 'CARD' | 'INVESTMENT';
-type CardType = 'CREDIT' | 'CHECK';
+export type AssetType =
+  | 'CASH' | 'CHECKING'
+  | 'STOCK' | 'DEPOSIT' | 'SAVINGS' | 'PENSION'
+  | 'INSURANCE' | 'REAL_ESTATE'
+  | 'LOAN' | 'OTHER_LIABILITY';
 
-interface CardDetails {
-  card_type: CardType;
-  settlement_day: number;
-  billing_start_offset: number;
-  billing_end_offset: number;
-  linked_asset_id: string | null;
-}
-
-interface AssetFormValues {
+export interface AssetFormValues {
   name: string;
   type: AssetType;
-  balance: number;
-  cardDetails?: CardDetails;
+  initial_balance: number;
 }
 
-interface BankAsset { id: string; name: string; }
-
-const TYPE_LABELS: Record<AssetType, string> = {
-  CASH: '현금', BANK: '은행 계좌', CARD: '신용/체크카드', INVESTMENT: '투자',
-};
-
-const SETTLEMENT_DAYS = Array.from({ length: 31 }, (_, i) => i + 1);
-
-// billing_start_offset 사용자 친화적 옵션
-// "결제일 N일 전부터 청구 시작"
-const BILLING_START_PRESETS = [
-  { label: '결제일 당월 1일부터 (당월 전체)', value: -30 },
-  { label: '전달 25일부터 (-6일)', value: -6 },
-  { label: '전달 16일부터 (-14일)', value: -14 },
-  { label: '전달 15일부터 (-15일)', value: -15 },
-  { label: '전달 1일부터 (-30일)', value: -30 },
-  { label: '직접 입력', value: null },
+const ASSET_GROUPS: { label: string; types: { type: AssetType; label: string; desc: string }[] }[] = [
+  {
+    label: '자산',
+    types: [
+      { type: 'CASH',        label: '현금',     desc: '' },
+      { type: 'CHECKING',    label: '자유입출금', desc: '은행 입출금 계좌' },
+      { type: 'STOCK',       label: '주식',     desc: '증권 계좌' },
+      { type: 'DEPOSIT',     label: '예금',     desc: '정기예금' },
+      { type: 'SAVINGS',     label: '적금',     desc: '정기적금' },
+      { type: 'PENSION',     label: '연금',     desc: 'IRP·퇴직연금 등' },
+      { type: 'INSURANCE',   label: '보험',     desc: '저축·변액보험 등' },
+      { type: 'REAL_ESTATE', label: '부동산',   desc: '아파트·토지 등' },
+    ],
+  },
+  {
+    label: '부채',
+    types: [
+      { type: 'LOAN',             label: '대출',   desc: '주담대·신용대출 등' },
+      { type: 'OTHER_LIABILITY',  label: '기타부채', desc: '' },
+    ],
+  },
 ];
+
+const ALL_TYPES = ASSET_GROUPS.flatMap((g) => g.types);
+
+const PLACEHOLDER: Partial<Record<AssetType, string>> = {
+  CHECKING:    '예: 신한은행 입출금',
+  STOCK:       '예: 삼성증권',
+  DEPOSIT:     '예: 국민은행 정기예금',
+  SAVINGS:     '예: 하나은행 적금',
+  PENSION:     '예: 퇴직연금 IRP',
+  INSURANCE:   '예: 삼성생명 저축보험',
+  REAL_ESTATE: '예: 강남구 아파트',
+  LOAN:        '예: 주택담보대출',
+};
 
 export default function AssetForm({
   initial,
@@ -50,62 +60,17 @@ export default function AssetForm({
 }) {
   const isEdit = !!initial;
   const [name, setName] = useState(initial?.name ?? '');
-  const [type, setType] = useState<AssetType>(initial?.type ?? 'BANK');
-  const [balance, setBalance] = useState<string>(
-    initial?.balance != null ? String(initial.balance) : ''
+  const [type, setType] = useState<AssetType>(initial?.type ?? 'CHECKING');
+  const [initialBalance, setInitialBalance] = useState<string>(
+    initial?.initial_balance != null ? String(initial.initial_balance) : ''
   );
 
-  // 카드 상세
-  const cd = initial?.card_details;
-  const [cardType, setCardType] = useState<CardType>(cd?.card_type ?? 'CREDIT');
-  const [settlementDay, setSettlementDay] = useState<number>(cd?.settlement_day ?? 15);
-  const [billingStartOffset, setBillingStartOffset] = useState<number>(cd?.billing_start_offset ?? -14);
-  const [billingEndOffset] = useState<number>(cd?.billing_end_offset ?? 0);
-  const [linkedAssetId, setLinkedAssetId] = useState<string>(cd?.linked_asset_id ?? '');
-  const [customOffset, setCustomOffset] = useState(false);
-  const [bankAssets, setBankAssets] = useState<BankAsset[]>([]);
-
-  useEffect(() => {
-    if (type === 'CARD') {
-      supabase
-        .from('assets')
-        .select('id, name')
-        .in('type', ['BANK', 'CASH'])
-        .eq('is_active', true)
-        .then(({ data }) => { if (data) setBankAssets(data); });
-    }
-  }, [type]);
-
-  // preset 선택 감지
-  const presetValue = BILLING_START_PRESETS.find((p) => p.value === billingStartOffset && p.value !== null)?.value ?? null;
-
-  const handlePresetChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const val = e.target.value;
-    if (val === 'custom') {
-      setCustomOffset(true);
-    } else {
-      setCustomOffset(false);
-      setBillingStartOffset(Number(val));
-    }
-  };
+  const isLiability = type === 'LOAN' || type === 'OTHER_LIABILITY';
+  const typeInfo = ALL_TYPES.find((t) => t.type === type);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const values: AssetFormValues = {
-      name,
-      type,
-      balance: Number(balance) || 0,
-    };
-    if (type === 'CARD') {
-      values.cardDetails = {
-        card_type: cardType,
-        settlement_day: settlementDay,
-        billing_start_offset: billingStartOffset,
-        billing_end_offset: billingEndOffset,
-        linked_asset_id: linkedAssetId || null,
-      };
-    }
-    onSave(values);
+    onSave({ name, type, initial_balance: Number(initialBalance) || 0 });
   };
 
   return (
@@ -113,27 +78,45 @@ export default function AssetForm({
       {/* 자산 종류 */}
       {!isEdit && (
         <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
-          <p className="text-sm font-semibold text-gray-500 mb-3">자산 종류</p>
-          <div className="grid grid-cols-2 gap-2">
-            {(Object.keys(TYPE_LABELS) as AssetType[]).map((t) => (
-              <button
-                key={t}
-                type="button"
-                onClick={() => setType(t)}
-                className={`py-3 text-sm font-medium rounded-xl border-2 transition-colors ${
-                  type === t ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-600 hover:border-gray-300'
-                }`}
-              >
-                {TYPE_LABELS[t]}
-              </button>
-            ))}
-          </div>
+          {ASSET_GROUPS.map((group) => (
+            <div key={group.label} className="mb-4 last:mb-0">
+              <p className="text-xs font-semibold text-gray-400 mb-2">{group.label}</p>
+              <div className="grid grid-cols-2 gap-2">
+                {group.types.map((t) => (
+                  <button
+                    key={t.type}
+                    type="button"
+                    onClick={() => setType(t.type)}
+                    className={`py-3 px-3 text-left rounded-xl border-2 transition-colors ${
+                      type === t.type
+                        ? 'border-blue-500 bg-blue-50'
+                        : 'border-gray-200 hover:border-gray-300'
+                    }`}
+                  >
+                    <p className={`text-sm font-semibold ${type === t.type ? 'text-blue-700' : 'text-gray-700'}`}>
+                      {t.label}
+                    </p>
+                    {t.desc && (
+                      <p className={`text-xs mt-0.5 ${type === t.type ? 'text-blue-400' : 'text-gray-400'}`}>
+                        {t.desc}
+                      </p>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
         </div>
       )}
 
       {/* 기본 정보 */}
       <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 space-y-4">
-        <p className="text-sm font-semibold text-gray-500">기본 정보</p>
+        {isEdit && (
+          <div className="flex items-center gap-2 pb-3 border-b border-gray-100">
+            <span className="text-sm font-semibold text-gray-700">{typeInfo?.label}</span>
+            {typeInfo?.desc && <span className="text-xs text-gray-400">{typeInfo.desc}</span>}
+          </div>
+        )}
         <div>
           <label className="text-xs text-gray-400 mb-1 block">이름</label>
           <input
@@ -141,123 +124,29 @@ export default function AssetForm({
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder={type === 'CARD' ? '예: 신한카드' : '예: 신한은행'}
-            className="w-full px-3 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            placeholder={PLACEHOLDER[type] ?? '이름 입력'}
+            className="w-full px-3 py-2.5 rounded-xl border border-gray-200 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
         </div>
-        {type !== 'CARD' && (
-          <div>
-            <label className="text-xs text-gray-400 mb-1 block">잔액 (원)</label>
-            <input
-              type="number"
-              value={balance}
-              onChange={(e) => setBalance(e.target.value)}
-              placeholder="0"
-              className="w-full px-3 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-        )}
+        <div>
+          <label className="text-xs text-gray-400 mb-1 block">
+            {isLiability ? '시작 부채 금액 (원)' : '시작 금액 (원)'}
+          </label>
+          <input
+            type="number"
+            value={initialBalance}
+            onChange={(e) => setInitialBalance(e.target.value)}
+            placeholder="0"
+            className="w-full px-3 py-2.5 rounded-xl border border-gray-200 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          <p className="text-xs text-gray-400 mt-1">
+            {isLiability
+              ? '거래 내역과 별개로 설정하는 초기 부채 금액입니다.'
+              : '거래 내역과 별개로 설정하는 초기 잔액입니다.'}
+          </p>
+        </div>
       </div>
 
-      {/* 카드 상세 */}
-      {type === 'CARD' && (
-        <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 space-y-4">
-          <p className="text-sm font-semibold text-gray-500">카드 상세 설정</p>
-
-          {/* 카드 종류 */}
-          <div>
-            <label className="text-xs text-gray-400 mb-2 block">카드 종류</label>
-            <div className="flex gap-2">
-              {(['CREDIT', 'CHECK'] as CardType[]).map((ct) => (
-                <button
-                  key={ct}
-                  type="button"
-                  onClick={() => setCardType(ct)}
-                  className={`flex-1 py-2 text-sm font-medium rounded-xl border-2 transition-colors ${
-                    cardType === ct ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-600'
-                  }`}
-                >
-                  {ct === 'CREDIT' ? '신용카드' : '체크카드'}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* 결제일 */}
-          <div>
-            <label className="text-xs text-gray-400 mb-1 block">결제일</label>
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-gray-500">매월</span>
-              <select
-                value={settlementDay}
-                onChange={(e) => setSettlementDay(Number(e.target.value))}
-                className="px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                {SETTLEMENT_DAYS.map((d) => (
-                  <option key={d} value={d}>{d}일</option>
-                ))}
-              </select>
-              <span className="text-sm text-gray-500">결제</span>
-            </div>
-          </div>
-
-          {/* 청구 시작일 */}
-          <div>
-            <label className="text-xs text-gray-400 mb-1 block">
-              공여기간 (청구 시작일)
-              <span className="ml-1 text-gray-300">· 결제일 기준</span>
-            </label>
-            {!customOffset ? (
-              <select
-                value={presetValue !== null ? String(presetValue) : 'custom'}
-                onChange={handlePresetChange}
-                className="w-full px-3 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                {BILLING_START_PRESETS.map((p) => (
-                  <option key={p.label} value={p.value !== null ? String(p.value) : 'custom'}>
-                    {p.label}
-                  </option>
-                ))}
-              </select>
-            ) : (
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-gray-500">결제일</span>
-                <input
-                  type="number"
-                  max={0}
-                  value={billingStartOffset}
-                  onChange={(e) => setBillingStartOffset(Number(e.target.value))}
-                  className="w-20 px-3 py-2 rounded-xl border border-gray-200 text-sm text-center focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-                <span className="text-sm text-gray-500">일 전부터</span>
-                <button type="button" onClick={() => setCustomOffset(false)} className="text-xs text-blue-500 ml-auto">프리셋 선택</button>
-              </div>
-            )}
-            <p className="text-xs text-gray-400 mt-1">
-              예상 청구 시작: 결제일 {Math.abs(billingStartOffset)}일 전 ({billingStartOffset === 0 ? '결제일 당일' : `결제일 ${Math.abs(billingStartOffset)}일 전`}부터)
-            </p>
-          </div>
-
-          {/* 연결 계좌 (신용카드만) */}
-          {cardType === 'CREDIT' && (
-            <div>
-              <label className="text-xs text-gray-400 mb-1 block">자동이체 연결 계좌 (선택)</label>
-              <select
-                value={linkedAssetId}
-                onChange={(e) => setLinkedAssetId(e.target.value)}
-                className="w-full px-3 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                <option value="">없음</option>
-                {bankAssets.map((a) => (
-                  <option key={a.id} value={a.id}>{a.name}</option>
-                ))}
-              </select>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* 저장 버튼 */}
       <button
         type="submit"
         disabled={saving || !name.trim()}

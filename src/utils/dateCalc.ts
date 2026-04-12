@@ -10,14 +10,19 @@ function clampToMonthEnd(year: number, month: number, day: number): Date {
 }
 
 /**
+ * billing_start_offset 의 특수 센티넬 값.
+ * "결제 대상월의 전달 1일 ~ 말일" 청구 주기를 나타냅니다.
+ */
+export const PREV_MONTH_BILLING_SENTINEL = -99;
+
+/**
  * 신용카드 공여기간 로직으로 실제 청구일(결제일)을 계산합니다.
  *
- * @param transactedAt      - 거래 발생일
- * @param settlementDay     - 카드 결제일 (1~31)
- * @param billingStartOffset - 결제일 기준 청구 시작 오프셋 (일수, 보통 음수)
- *                            예: -14 → 결제일 14일 전부터 청구 시작
- * @param billingEndOffset  - 결제일 기준 청구 마감 오프셋 (일수)
- *                            예: 0 → 결제일 당일까지 청구
+ * @param transactedAt       - 거래 발생일
+ * @param settlementDay      - 카드 결제일 (1~31)
+ * @param billingStartOffset - 결제일 기준 청구 시작 오프셋(일수, 보통 음수)
+ *                             또는 PREV_MONTH_BILLING_SENTINEL(-99): 전달 1일~말일
+ * @param billingEndOffset   - 결제일 기준 청구 마감 오프셋(일수). 센티넬 모드에서는 무시.
  */
 export const calculateExpectedBillingDate = (
   transactedAt: Date,
@@ -28,7 +33,29 @@ export const calculateExpectedBillingDate = (
   const tx = new Date(transactedAt);
   tx.setHours(0, 0, 0, 0);
 
-  // 현재 월부터 최대 3개월 앞까지 해당하는 청구 사이클을 찾는다
+  // 센티넬: 전달 1일 ~ 말일 청구 주기
+  if (billingStartOffset === PREV_MONTH_BILLING_SENTINEL) {
+    for (let monthOffset = 0; monthOffset <= 3; monthOffset++) {
+      const settlementMonth = new Date(tx.getFullYear(), tx.getMonth() + monthOffset, 1);
+      const settlement = clampToMonthEnd(
+        settlementMonth.getFullYear(),
+        settlementMonth.getMonth(),
+        settlementDay,
+      );
+      // 청구 대상: 결제월의 전달 1일 ~ 말일
+      const prevYear = settlementMonth.getMonth() === 0 ? settlementMonth.getFullYear() - 1 : settlementMonth.getFullYear();
+      const prevMonth = settlementMonth.getMonth() === 0 ? 11 : settlementMonth.getMonth() - 1;
+      const periodStart = new Date(prevYear, prevMonth, 1);
+      const periodEnd = new Date(prevYear, prevMonth + 1, 0); // 말일
+
+      if (tx >= periodStart && tx <= periodEnd) {
+        return settlement;
+      }
+    }
+    return clampToMonthEnd(tx.getFullYear(), tx.getMonth() + 1, settlementDay);
+  }
+
+  // 일반: 결제일 기준 오프셋
   for (let monthOffset = 0; monthOffset <= 3; monthOffset++) {
     const refDate = new Date(tx.getFullYear(), tx.getMonth() + monthOffset, 1);
     const settlement = clampToMonthEnd(refDate.getFullYear(), refDate.getMonth(), settlementDay);
@@ -41,6 +68,5 @@ export const calculateExpectedBillingDate = (
     }
   }
 
-  // fallback: 단순 다음달 결제일
   return clampToMonthEnd(tx.getFullYear(), tx.getMonth() + 1, settlementDay);
 };

@@ -37,11 +37,16 @@ export function GroupProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser] = useState<Member | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const fetchGroup = async () => {
+  const fetchGroup = async (userId?: string) => {
     setLoading(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) { setLoading(false); return; }
+      let uid = userId;
+      if (!uid) {
+        const { data: { session } } = await supabase.auth.getSession();
+        uid = session?.user?.id;
+      }
+      if (!uid) { setLoading(false); return; }
+      const user = { id: uid };
 
       // 현재 유저 정보
       const { data: me } = await supabase
@@ -79,10 +84,8 @@ export function GroupProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
-    fetchGroup();
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(() => {
-      fetchGroup();
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      fetchGroup(session?.user?.id);
     });
     return () => subscription.unsubscribe();
   }, []);
