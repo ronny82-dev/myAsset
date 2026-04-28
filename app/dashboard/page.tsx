@@ -24,9 +24,23 @@ interface CatSummaryItem {
 }
 
 interface CatDetailPoint {
-  month: string;
-  label: string;
+  month: string;  // XAxis용 "MM"
+  label: string;  // "YYYY년 M월"
+  ym: string;     // "YYYY-MM"
   amount: number;
+}
+
+interface SubCatItem {
+  id: number;
+  name: string;
+  amount: number;
+}
+
+interface TxDetailItem {
+  id: string;
+  transacted_at: string;
+  amount: number;
+  description: string | null;
 }
 
 const ASSET_TYPE_LABEL: Record<string, string> = {
@@ -88,9 +102,15 @@ export default function DashboardPage() {
   // 카테고리별 지출 관련 state
   const [monthlyCatSummary, setMonthlyCatSummary] = useState<CatSummaryItem[]>([]);
   const [monthlyCatLoading, setMonthlyCatLoading] = useState(true);
-  const [selectedCat, setSelectedCat] = useState<string | null>(null);
+  const [selectedCat, setSelectedCat] = useState<string | null>(null);       // 대분류
+  const [subCatSummary, setSubCatSummary] = useState<SubCatItem[]>([]);
+  const [subCatLoading, setSubCatLoading] = useState(false);
+  const [selectedSubCat, setSelectedSubCat] = useState<SubCatItem | null>(null); // 소분류
   const [catDetailData, setCatDetailData] = useState<CatDetailPoint[]>([]);
   const [catDetailLoading, setCatDetailLoading] = useState(false);
+  const [selectedDetailMonth, setSelectedDetailMonth] = useState<string | null>(null); // 월 상세
+  const [txDetail, setTxDetail] = useState<TxDetailItem[]>([]);
+  const [txDetailLoading, setTxDetailLoading] = useState(false);
 
   const [selectedMonth, setSelectedMonth] = useState(() => {
     const now = new Date();
@@ -114,10 +134,81 @@ export default function DashboardPage() {
   useEffect(() => { fetchChartData(); }, [selectedMonth]);
   useEffect(() => {
     setSelectedCat(null);
+    setSelectedSubCat(null);
+    setSelectedDetailMonth(null);
     fetchMonthlyCatSummary();
   }, [selectedMonth]);
 
-  const fetchCatDetail = useCallback(async (catName: string, baseMonth: string) => {
+  // 대분류 선택 → 소분류 목록 조회
+  useEffect(() => {
+    setSelectedSubCat(null);
+    setSelectedDetailMonth(null);
+    if (selectedCat) fetchSubCatSummary();
+  }, [selectedCat]);
+
+  // 소분류 선택 → 12개월 추이 조회
+  useEffect(() => {
+    setSelectedDetailMonth(null);
+    if (selectedSubCat) fetchSubCatDetail(selectedSubCat.id, selectedMonth);
+  }, [selectedSubCat, selectedMonth]);
+
+  // 월 선택 → 거래 상세 조회
+  useEffect(() => {
+    if (selectedDetailMonth && selectedSubCat) fetchTxDetail(selectedSubCat.id, selectedDetailMonth);
+  }, [selectedDetailMonth]);
+
+  // 대분류 선택 시 해당 월의 소분류별 금액 조회
+  const fetchSubCatSummary = async () => {
+    setSubCatLoading(true);
+    try {
+      const [y, m] = selectedMonth.split('-').map(Number);
+      const startDate = `${selectedMonth}-01`;
+      const nm = new Date(y, m, 1);
+      const exclusiveEnd = `${nm.getFullYear()}-${String(nm.getMonth() + 1).padStart(2, '0')}-01`;
+
+      const [catRes, txRes] = await Promise.all([
+        supabase.from('categories').select('id, name, parent_id, is_system'),
+        supabase.from('transactions')
+          .select('amount, category_id')
+          .eq('type', 'EXPENSE')
+          .eq('is_deleted', false)
+          .gte('transacted_at', startDate)
+          .lt('transacted_at', exclusiveEnd)
+          .not('category_id', 'is', null)
+          .limit(5000),
+      ]);
+
+      const cats = catRes.data ?? [];
+      const catMap = buildCatMap(cats);
+      const parent = cats.find(c => c.name === selectedCat && c.parent_id === null && !c.is_system);
+      if (!parent) { setSubCatSummary([]); return; }
+
+      const totals: Record<number, number> = {};
+      for (const tx of txRes.data ?? []) {
+        const cat = catMap[tx.category_id];
+        if (!cat || cat.is_system) continue;
+        if (cat.parent_id === parent.id) {
+          totals[tx.category_id] = (totals[tx.category_id] ?? 0) + tx.amount;
+        } else if (tx.category_id === parent.id) {
+          totals[parent.id] = (totals[parent.id] ?? 0) + tx.amount;
+        }
+      }
+
+      const subCats = cats.filter(c => c.parent_id === parent.id && !c.is_system);
+      const result: SubCatItem[] = [];
+      for (const s of subCats) {
+        if ((totals[s.id] ?? 0) > 0) result.push({ id: s.id, name: s.name, amount: totals[s.id] });
+      }
+      if ((totals[parent.id] ?? 0) > 0) result.push({ id: parent.id, name: parent.name, amount: totals[parent.id] });
+      result.sort((a, b) => b.amount - a.amount);
+      setSubCatSummary(result);
+    } finally {
+      setSubCatLoading(false);
+    }
+  };
+
+  // 소분류 선택 시 최근 12개월 추이 조회 (category_id 직접 매칭)
+  const fetchSubCatDetail = useCallback(async (subCatId: number, baseMonth: string) => {
     setCatDetailLoading(true);
     try {
       const [selYear, selMonthNum] = baseMonth.split('-').map(Number);
@@ -134,42 +225,57 @@ export default function DashboardPage() {
       const nextMonth = new Date(ey, em, 1);
       const exclusiveEnd = `${nextMonth.getFullYear()}-${String(nextMonth.getMonth() + 1).padStart(2, '0')}-01`;
 
-      const [catRes, txRes] = await Promise.all([
-        supabase.from('categories').select('id, name, parent_id, is_system'),
-        supabase.from('transactions')
-          .select('amount, category_id, transacted_at')
-          .eq('type', 'EXPENSE')
-          .eq('is_deleted', false)
-          .gte('transacted_at', startDate)
-          .lt('transacted_at', exclusiveEnd)
-          .not('category_id', 'is', null)
-          .limit(5000),
-      ]);
+      const { data } = await supabase
+        .from('transactions')
+        .select('amount, transacted_at')
+        .eq('type', 'EXPENSE')
+        .eq('is_deleted', false)
+        .eq('category_id', subCatId)
+        .gte('transacted_at', startDate)
+        .lt('transacted_at', exclusiveEnd)
+        .limit(5000);
 
-      const catMap = buildCatMap(catRes.data ?? []);
       const byMonth: Record<string, number> = {};
       for (const ym of trendMonths) byMonth[ym] = 0;
-
-      for (const tx of txRes.data ?? []) {
+      for (const tx of data ?? []) {
         const ym = (tx.transacted_at as string).slice(0, 7);
-        if (!(ym in byMonth)) continue;
-        if (getParentLabel(tx.category_id, catMap) !== catName) continue;
-        byMonth[ym] += tx.amount;
+        if (ym in byMonth) byMonth[ym] += tx.amount;
       }
 
-      const data: CatDetailPoint[] = trendMonths.map((ym) => {
+      setCatDetailData(trendMonths.map((ym) => {
         const [y, m] = ym.split('-').map(Number);
-        return { month: ym.slice(5), label: `${y}년 ${m}월`, amount: byMonth[ym] };
-      });
-      setCatDetailData(data);
+        return { month: ym.slice(5), label: `${y}년 ${m}월`, ym, amount: byMonth[ym] };
+      }));
     } finally {
       setCatDetailLoading(false);
     }
   }, []);
 
-  useEffect(() => {
-    if (selectedCat) fetchCatDetail(selectedCat, selectedMonth);
-  }, [selectedCat, selectedMonth, fetchCatDetail]);
+  // 월 클릭 시 해당 소분류의 거래 상세 조회
+  const fetchTxDetail = useCallback(async (subCatId: number, month: string) => {
+    setTxDetailLoading(true);
+    try {
+      const [y, m] = month.split('-').map(Number);
+      const startDate = `${month}-01`;
+      const nm = new Date(y, m, 1);
+      const exclusiveEnd = `${nm.getFullYear()}-${String(nm.getMonth() + 1).padStart(2, '0')}-01`;
+
+      const { data } = await supabase
+        .from('transactions')
+        .select('id, transacted_at, amount, description')
+        .eq('type', 'EXPENSE')
+        .eq('is_deleted', false)
+        .eq('category_id', subCatId)
+        .gte('transacted_at', startDate)
+        .lt('transacted_at', exclusiveEnd)
+        .order('transacted_at', { ascending: false })
+        .limit(200);
+
+      setTxDetail(data ?? []);
+    } finally {
+      setTxDetailLoading(false);
+    }
+  }, []);
 
   const fetchDashboardData = async () => {
     setLoading(true);
@@ -371,31 +477,97 @@ export default function DashboardPage() {
     );
   };
 
-  // 카테고리별 지출 탭 — 카테고리 상세 뷰
-  const renderCatDetail = () => {
+  // Lv2: 소분류 목록
+  const renderSubCatSummary = () => {
     const [y, m] = selectedMonth.split('-').map(Number);
-    const reversedData = [...catDetailData].reverse();
-    const totalAmount = catDetailData.reduce((s, d) => s + d.amount, 0);
-
+    const total = subCatSummary.reduce((s, c) => s + c.amount, 0);
+    const max = Math.max(...subCatSummary.map(c => c.amount), 1);
     return (
       <div className="space-y-4">
-        {/* 헤더 */}
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => setSelectedCat(null)}
-            className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors text-gray-500"
-          >
+          <button onClick={() => setSelectedCat(null)} className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors text-gray-500">
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
             </svg>
           </button>
           <div>
             <p className="text-sm font-bold text-gray-800">{selectedCat}</p>
+            <p className="text-xs text-gray-400">{y}년 {m}월 소분류별 지출</p>
+          </div>
+        </div>
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+          {subCatLoading ? (
+            <div className="space-y-3 px-4 py-4">
+              {[...Array(3)].map((_, i) => (
+                <div key={i} className="animate-pulse space-y-1.5">
+                  <div className="flex justify-between"><div className="h-3.5 w-16 bg-gray-100 rounded" /><div className="h-3.5 w-20 bg-gray-100 rounded" /></div>
+                  <div className="h-2 bg-gray-100 rounded-full" />
+                </div>
+              ))}
+            </div>
+          ) : subCatSummary.length === 0 ? (
+            <p className="text-center text-gray-400 text-sm py-10">소분류 지출 내역이 없습니다.</p>
+          ) : (
+            <>
+              <div className="px-4 pt-3 pb-2 flex justify-between">
+                <p className="text-sm font-bold text-gray-700">소분류</p>
+                <p className="text-xs text-gray-400">합계 <span className="font-semibold text-gray-600">{total.toLocaleString('ko-KR')}원</span></p>
+              </div>
+              <div className="divide-y divide-gray-50">
+                {subCatSummary.map(({ id, name, amount }, i) => {
+                  const pct = Math.round((amount / max) * 100);
+                  const color = CAT_COLORS[i % CAT_COLORS.length];
+                  const sharePct = Math.round((amount / total) * 100);
+                  return (
+                    <button key={id} onClick={() => setSelectedSubCat({ id, name, amount })}
+                      className="w-full px-4 py-3 hover:bg-gray-50 transition-colors text-left">
+                      <div className="flex items-center justify-between mb-1.5">
+                        <div className="flex items-center gap-2">
+                          <span className="inline-block w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: color }} />
+                          <span className="text-sm font-medium text-gray-800">{name}</span>
+                          <span className="text-xs text-gray-400">{sharePct}%</span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <span className="text-sm font-semibold text-gray-800">{amount.toLocaleString('ko-KR')}원</span>
+                          <svg className="w-3.5 h-3.5 text-gray-300 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                          </svg>
+                        </div>
+                      </div>
+                      <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                        <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct}%`, backgroundColor: color }} />
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  // Lv3: 소분류 12개월 추이 + 월 클릭
+  const renderCatDetail = () => {
+    const [y, m] = selectedMonth.split('-').map(Number);
+    const reversedData = [...catDetailData].reverse();
+    const totalAmount = catDetailData.reduce((s, d) => s + d.amount, 0);
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center gap-2">
+          <button onClick={() => setSelectedSubCat(null)} className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors text-gray-500">
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+            </svg>
+          </button>
+          <div>
+            <p className="text-xs text-gray-400">{selectedCat}</p>
+            <p className="text-sm font-bold text-gray-800">{selectedSubCat?.name}</p>
             <p className="text-xs text-gray-400">최근 12개월 · 합계 {totalAmount.toLocaleString('ko-KR')}원</p>
           </div>
         </div>
 
-        {/* 추이 차트 */}
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
           <div className="px-4 pt-3 pb-1">
             <p className="text-xs font-bold text-gray-500">월별 지출 추이</p>
@@ -405,7 +577,11 @@ export default function DashboardPage() {
           ) : (
             <div className="px-2 pb-3">
               <ResponsiveContainer width="100%" height={150}>
-                <AreaChart data={catDetailData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                <AreaChart data={catDetailData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}
+                  onClick={(e: any) => {
+                    const payload = e?.activePayload?.[0]?.payload;
+                    if (payload?.amount > 0) setSelectedDetailMonth(payload.ym);
+                  }}>
                   <defs>
                     <linearGradient id="catGrad" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.2} />
@@ -415,42 +591,106 @@ export default function DashboardPage() {
                   <XAxis dataKey="month" tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
                   <YAxis tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} tickFormatter={formatWon} width={44} />
                   <Tooltip
-                    formatter={(value) => [`${Number(value ?? 0).toLocaleString('ko-KR')}원`, selectedCat ?? '']}
+                    formatter={(value) => [`${Number(value ?? 0).toLocaleString('ko-KR')}원`, selectedSubCat?.name ?? '']}
                     labelFormatter={(label) => `${label}월`}
                     contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e5e7eb' }}
                   />
                   <Area type="monotone" dataKey="amount" stroke="#3b82f6" strokeWidth={2} fill="url(#catGrad)" dot={false} activeDot={{ r: 4, fill: '#3b82f6' }} />
                 </AreaChart>
               </ResponsiveContainer>
+              <p className="text-center text-xs text-gray-400 mt-1">월을 클릭하면 상세 내역을 확인할 수 있습니다</p>
             </div>
           )}
         </div>
 
-        {/* 월별 금액 테이블 */}
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
           <div className="px-4 pt-3 pb-1">
-            <p className="text-xs font-bold text-gray-500">월별 사용 금액</p>
+            <p className="text-xs font-bold text-gray-500">월별 사용 금액 <span className="font-normal text-gray-400 ml-1">(클릭하면 상세 확인)</span></p>
           </div>
           {catDetailLoading ? (
             <div className="h-24 flex items-center justify-center text-gray-400 text-sm">불러오는 중...</div>
           ) : (
             <div className="divide-y divide-gray-50">
-              {reversedData.map((row) => (
-                <div
-                  key={row.month}
-                  className={`flex items-center justify-between px-4 py-3 ${
-                    row.label === `${y}년 ${m}월` ? 'bg-blue-50' : ''
-                  }`}
-                >
-                  <span className={`text-sm ${row.label === `${y}년 ${m}월` ? 'font-bold text-blue-700' : 'text-gray-600'}`}>
-                    {row.label}
-                    {row.label === `${y}년 ${m}월` && <span className="ml-1.5 text-xs font-normal text-blue-400">선택월</span>}
-                  </span>
-                  <span className={`text-sm font-semibold ${row.amount === 0 ? 'text-gray-300' : row.label === `${y}년 ${m}월` ? 'text-blue-700' : 'text-gray-800'}`}>
-                    {row.amount === 0 ? '—' : `${row.amount.toLocaleString('ko-KR')}원`}
-                  </span>
+              {reversedData.map((row) => {
+                const isSelected = row.label === `${y}년 ${m}월`;
+                return (
+                  <button key={row.month} disabled={row.amount === 0}
+                    onClick={() => setSelectedDetailMonth(row.ym)}
+                    className={`w-full flex items-center justify-between px-4 py-3 transition-colors text-left
+                      ${row.amount === 0 ? 'cursor-default' : 'hover:bg-gray-50 cursor-pointer'}
+                      ${isSelected ? 'bg-blue-50' : ''}`}>
+                    <span className={`text-sm ${isSelected ? 'font-bold text-blue-700' : 'text-gray-600'}`}>
+                      {row.label}
+                      {isSelected && <span className="ml-1.5 text-xs font-normal text-blue-400">선택월</span>}
+                    </span>
+                    <div className="flex items-center gap-1">
+                      <span className={`text-sm font-semibold ${row.amount === 0 ? 'text-gray-300' : isSelected ? 'text-blue-700' : 'text-gray-800'}`}>
+                        {row.amount === 0 ? '—' : `${row.amount.toLocaleString('ko-KR')}원`}
+                      </span>
+                      {row.amount > 0 && (
+                        <svg className="w-3.5 h-3.5 text-gray-300 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                        </svg>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  // Lv4: 특정 월의 거래 상세 목록
+  const renderTxDetail = () => {
+    const ym = selectedDetailMonth ?? '';
+    const [dy, dm] = ym.split('-').map(Number);
+    const labelMonth = ym ? `${dy}년 ${dm}월` : '';
+    const total = txDetail.reduce((s, t) => s + t.amount, 0);
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center gap-2">
+          <button onClick={() => setSelectedDetailMonth(null)} className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors text-gray-500">
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+            </svg>
+          </button>
+          <div>
+            <p className="text-xs text-gray-400">{selectedCat} · {selectedSubCat?.name}</p>
+            <p className="text-sm font-bold text-gray-800">{labelMonth} 상세 내역</p>
+          </div>
+        </div>
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+          <div className="px-4 pt-3 pb-2 flex justify-between items-center">
+            <p className="text-sm font-bold text-gray-700">{labelMonth}</p>
+            {total > 0 && <p className="text-xs text-gray-400">합계 <span className="font-semibold text-gray-700">{total.toLocaleString('ko-KR')}원</span></p>}
+          </div>
+          {txDetailLoading ? (
+            <div className="space-y-2 px-4 pb-4">
+              {[...Array(4)].map((_, i) => (
+                <div key={i} className="animate-pulse flex justify-between py-2">
+                  <div className="h-4 w-24 bg-gray-100 rounded" /><div className="h-4 w-20 bg-gray-100 rounded" />
                 </div>
               ))}
+            </div>
+          ) : txDetail.length === 0 ? (
+            <p className="text-center text-gray-400 text-sm py-10">거래 내역이 없습니다.</p>
+          ) : (
+            <div className="divide-y divide-gray-50">
+              {txDetail.map((tx) => {
+                const dateStr = (tx.transacted_at as string).slice(0, 10);
+                return (
+                  <div key={tx.id} className="flex items-center justify-between px-4 py-3">
+                    <div>
+                      <p className="text-xs text-gray-400">{dateStr}</p>
+                      <p className="text-sm text-gray-700 mt-0.5">{tx.description || '(메모 없음)'}</p>
+                    </div>
+                    <p className="text-sm font-semibold text-gray-800 ml-4 shrink-0">{tx.amount.toLocaleString('ko-KR')}원</p>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
@@ -629,10 +869,13 @@ export default function DashboardPage() {
             </button>
           </div>
 
-          {/* 탭 콘텐츠 — 카테고리별 지출 */}
-          {activeTab === 'spending' && (
-            selectedCat ? renderCatDetail() : renderMonthlySummary()
-          )}
+          {/* 탭 콘텐츠 — 카테고리별 지출 (4단계 드릴다운) */}
+          {activeTab === 'spending' && (() => {
+            if (!selectedCat) return renderMonthlySummary();
+            if (!selectedSubCat) return renderSubCatSummary();
+            if (!selectedDetailMonth) return renderCatDetail();
+            return renderTxDetail();
+          })()}
 
           {/* 탭 콘텐츠 — 자산 / 부채 */}
           {activeTab === 'assets' && (
