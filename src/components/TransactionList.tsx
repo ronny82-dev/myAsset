@@ -49,6 +49,7 @@ const AMT_COLOR: Record<string, string> = {
 
 const MIN_DATE = '2025-01-01';
 const MAX_RANGE_DAYS = 365;
+const EXCLUDED_CAT_NAMES = new Set(['카드정산', '이체/대체']);
 
 const toYMD = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -228,8 +229,26 @@ export default function TransactionList() {
     [...new Set(filtered.map((tx) => tx.assets?.name).filter(Boolean) as string[])].sort(),
     [filtered]);
 
-  const totalExpense = colFiltered.filter((t) => t.type === 'EXPENSE').reduce((s, t) => s + t.amount, 0);
-  const totalIncome = colFiltered.filter((t) => t.type === 'INCOME').reduce((s, t) => s + t.amount, 0);
+  const catMap = useMemo(() => {
+    const map: Record<number, Category> = {};
+    for (const c of categories) map[c.id] = c;
+    return map;
+  }, [categories]);
+
+  const isExcluded = (t: Transaction) => {
+    if (t.categories?.name != null && EXCLUDED_CAT_NAMES.has(t.categories.name)) return true;
+    if (t.category_id != null) {
+      const cat = catMap[t.category_id];
+      if (cat?.parent_id != null) {
+        const parent = catMap[cat.parent_id];
+        if (parent?.name != null && EXCLUDED_CAT_NAMES.has(parent.name)) return true;
+      }
+    }
+    return false;
+  };
+
+  const totalExpense = colFiltered.filter((t) => t.type === 'EXPENSE' && !isExcluded(t)).reduce((s, t) => s + t.amount, 0);
+  const totalIncome  = colFiltered.filter((t) => t.type === 'INCOME'  && !isExcluded(t)).reduce((s, t) => s + t.amount, 0);
 
   // 카테고리 트리 (편집용)
   const categoryOptions = useMemo(() => {
@@ -661,6 +680,7 @@ export default function TransactionList() {
           {groupedKeys.map((groupKey) => {
             const txs = grouped[groupKey];
             const groupNet = txs.reduce((s, t) => {
+              if (isExcluded(t)) return s;
               if (t.type === 'INCOME') return s + t.amount;
               if (t.type === 'EXPENSE') return s - t.amount;
               return s;

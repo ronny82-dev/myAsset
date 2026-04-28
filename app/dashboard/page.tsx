@@ -51,6 +51,8 @@ const ASSET_TYPE_LABEL: Record<string, string> = {
 
 const LIABILITY_TYPES = ['CARD', 'LOAN', 'OTHER_LIABILITY'];
 const CAT_COLORS = ['#3b82f6', '#f59e0b', '#10b981', '#ef4444', '#8b5cf6', '#6b7280', '#ec4899', '#14b8a6'];
+// 합산에서 제외할 카테고리 이름 (이체/이전 성격)
+const EXCLUDED_CAT_NAMES = new Set(['카드정산', '이체/대체']);
 
 function formatWon(value: number) {
   if (Math.abs(value) >= 100_000_000) return `${(value / 100_000_000).toFixed(1)}억`;
@@ -67,9 +69,11 @@ function buildCatMap(cats: { id: number; name: string; parent_id: number | null;
 function getParentLabel(id: number, catMap: Record<number, { name: string; parent_id: number | null; is_system: boolean }>): string | null {
   const cat = catMap[id];
   if (!cat || cat.is_system) return null;
+  if (EXCLUDED_CAT_NAMES.has(cat.name)) return null;
   if (cat.parent_id) {
     const parent = catMap[cat.parent_id];
     if (!parent || parent.is_system) return null;
+    if (EXCLUDED_CAT_NAMES.has(parent.name)) return null;
     return parent.name;
   }
   return cat.name;
@@ -99,9 +103,11 @@ export default function DashboardPage() {
     return (localStorage.getItem('dashboard_activeTab') as 'spending' | 'assets') ?? 'spending';
   });
 
-  // 카테고리별 지출 관련 state
+  // 카테고리별 지출/수입 관련 state
   const [monthlyCatSummary, setMonthlyCatSummary] = useState<CatSummaryItem[]>([]);
+  const [monthlyIncomeSummary, setMonthlyIncomeSummary] = useState<CatSummaryItem[]>([]);
   const [monthlyCatLoading, setMonthlyCatLoading] = useState(true);
+  const [selectedCatType, setSelectedCatType] = useState<'EXPENSE' | 'INCOME'>('EXPENSE');
   const [selectedCat, setSelectedCat] = useState<string | null>(null);       // 대분류
   const [subCatSummary, setSubCatSummary] = useState<SubCatItem[]>([]);
   const [subCatLoading, setSubCatLoading] = useState(false);
@@ -136,6 +142,7 @@ export default function DashboardPage() {
     setSelectedCat(null);
     setSelectedSubCat(null);
     setSelectedDetailMonth(null);
+    setSelectedCatType('EXPENSE');
     fetchMonthlyCatSummary();
   }, [selectedMonth]);
 
@@ -149,12 +156,12 @@ export default function DashboardPage() {
   // 소분류 선택 → 12개월 추이 조회
   useEffect(() => {
     setSelectedDetailMonth(null);
-    if (selectedSubCat) fetchSubCatDetail(selectedSubCat.id, selectedMonth);
-  }, [selectedSubCat, selectedMonth]);
+    if (selectedSubCat) fetchSubCatDetail(selectedSubCat.id, selectedMonth, selectedCatType);
+  }, [selectedSubCat, selectedMonth, selectedCatType]);
 
   // 월 선택 → 거래 상세 조회
   useEffect(() => {
-    if (selectedDetailMonth && selectedSubCat) fetchTxDetail(selectedSubCat.id, selectedDetailMonth);
+    if (selectedDetailMonth && selectedSubCat) fetchTxDetail(selectedSubCat.id, selectedDetailMonth, selectedCatType);
   }, [selectedDetailMonth]);
 
   // 대분류 선택 시 해당 월의 소분류별 금액 조회
@@ -170,7 +177,7 @@ export default function DashboardPage() {
         supabase.from('categories').select('id, name, parent_id, is_system'),
         supabase.from('transactions')
           .select('amount, category_id')
-          .eq('type', 'EXPENSE')
+          .eq('type', selectedCatType)
           .eq('is_deleted', false)
           .gte('transacted_at', startDate)
           .lt('transacted_at', exclusiveEnd)
@@ -180,7 +187,7 @@ export default function DashboardPage() {
 
       const cats = catRes.data ?? [];
       const catMap = buildCatMap(cats);
-      const parent = cats.find(c => c.name === selectedCat && c.parent_id === null && !c.is_system);
+      const parent = cats.find(c => c.name === selectedCat && c.parent_id === null && !c.is_system && !EXCLUDED_CAT_NAMES.has(c.name));
       if (!parent) { setSubCatSummary([]); return; }
 
       const totals: Record<number, number> = {};
@@ -208,7 +215,7 @@ export default function DashboardPage() {
   };
 
   // 소분류 선택 시 최근 12개월 추이 조회 (category_id 직접 매칭)
-  const fetchSubCatDetail = useCallback(async (subCatId: number, baseMonth: string) => {
+  const fetchSubCatDetail = useCallback(async (subCatId: number, baseMonth: string, type: 'EXPENSE' | 'INCOME') => {
     setCatDetailLoading(true);
     try {
       const [selYear, selMonthNum] = baseMonth.split('-').map(Number);
@@ -228,7 +235,7 @@ export default function DashboardPage() {
       const { data } = await supabase
         .from('transactions')
         .select('amount, transacted_at')
-        .eq('type', 'EXPENSE')
+        .eq('type', type)
         .eq('is_deleted', false)
         .eq('category_id', subCatId)
         .gte('transacted_at', startDate)
@@ -252,7 +259,7 @@ export default function DashboardPage() {
   }, []);
 
   // 월 클릭 시 해당 소분류의 거래 상세 조회
-  const fetchTxDetail = useCallback(async (subCatId: number, month: string) => {
+  const fetchTxDetail = useCallback(async (subCatId: number, month: string, type: 'EXPENSE' | 'INCOME') => {
     setTxDetailLoading(true);
     try {
       const [y, m] = month.split('-').map(Number);
@@ -263,7 +270,7 @@ export default function DashboardPage() {
       const { data } = await supabase
         .from('transactions')
         .select('id, transacted_at, amount, description')
-        .eq('type', 'EXPENSE')
+        .eq('type', type)
         .eq('is_deleted', false)
         .eq('category_id', subCatId)
         .gte('transacted_at', startDate)
@@ -360,7 +367,7 @@ export default function DashboardPage() {
       const nextMonth = new Date(y, m, 1);
       const exclusiveEnd = `${nextMonth.getFullYear()}-${String(nextMonth.getMonth() + 1).padStart(2, '0')}-01`;
 
-      const [catRes, txRes] = await Promise.all([
+      const [catRes, expenseRes, incomeRes] = await Promise.all([
         supabase.from('categories').select('id, name, parent_id, is_system'),
         supabase.from('transactions')
           .select('amount, category_id')
@@ -370,20 +377,37 @@ export default function DashboardPage() {
           .lt('transacted_at', exclusiveEnd)
           .not('category_id', 'is', null)
           .limit(5000),
+        supabase.from('transactions')
+          .select('amount, category_id')
+          .eq('type', 'INCOME')
+          .eq('is_deleted', false)
+          .gte('transacted_at', startDate)
+          .lt('transacted_at', exclusiveEnd)
+          .not('category_id', 'is', null)
+          .limit(5000),
       ]);
 
       const catMap = buildCatMap(catRes.data ?? []);
-      const totals: Record<string, number> = {};
-      for (const tx of txRes.data ?? []) {
+
+      const expenseTotals: Record<string, number> = {};
+      for (const tx of expenseRes.data ?? []) {
         const label = getParentLabel(tx.category_id, catMap);
         if (!label) continue;
-        totals[label] = (totals[label] ?? 0) + tx.amount;
+        expenseTotals[label] = (expenseTotals[label] ?? 0) + tx.amount;
       }
+      setMonthlyCatSummary(
+        Object.entries(expenseTotals).sort((a, b) => b[1] - a[1]).map(([name, amount]) => ({ name, amount }))
+      );
 
-      const sorted = Object.entries(totals)
-        .sort((a, b) => b[1] - a[1])
-        .map(([name, amount]) => ({ name, amount }));
-      setMonthlyCatSummary(sorted);
+      const incomeTotals: Record<string, number> = {};
+      for (const tx of incomeRes.data ?? []) {
+        const label = getParentLabel(tx.category_id, catMap);
+        if (!label) continue;
+        incomeTotals[label] = (incomeTotals[label] ?? 0) + tx.amount;
+      }
+      setMonthlyIncomeSummary(
+        Object.entries(incomeTotals).sort((a, b) => b[1] - a[1]).map(([name, amount]) => ({ name, amount }))
+      );
     } finally {
       setMonthlyCatLoading(false);
     }
@@ -698,24 +722,25 @@ export default function DashboardPage() {
     );
   };
 
-  // 카테고리별 지출 탭 — 월간 요약 목록
+  // 카테고리별 지출 탭 — 월간 요약 목록 (지출 + 수입)
   const renderMonthlySummary = () => {
     const [y, m] = selectedMonth.split('-').map(Number);
-    const totalAmount = monthlyCatSummary.reduce((s, c) => s + c.amount, 0);
-    const maxAmount = Math.max(...monthlyCatSummary.map(c => c.amount), 1);
+    const totalExpense = monthlyCatSummary.reduce((s, c) => s + c.amount, 0);
+    const totalIncome = monthlyIncomeSummary.reduce((s, c) => s + c.amount, 0);
+    const maxExpense = Math.max(...monthlyCatSummary.map(c => c.amount), 1);
+    const maxIncome = Math.max(...monthlyIncomeSummary.map(c => c.amount), 1);
 
-    return (
-      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-        <div className="px-4 pt-3 pb-2 flex items-center justify-between">
-          <p className="text-sm font-bold text-gray-700">{y}년 {m}월 카테고리별 지출</p>
-          {totalAmount > 0 && (
-            <p className="text-xs text-gray-400">합계 <span className="font-semibold text-gray-600">{totalAmount.toLocaleString('ko-KR')}원</span></p>
-          )}
-        </div>
-
-        {monthlyCatLoading ? (
-          <div className="space-y-3 px-4 pb-4">
-            {[...Array(4)].map((_, i) => (
+    const renderCatList = (
+      list: CatSummaryItem[],
+      total: number,
+      max: number,
+      type: 'EXPENSE' | 'INCOME',
+      emptyMsg: string
+    ) => {
+      if (monthlyCatLoading) {
+        return (
+          <div className="space-y-3 px-4 pb-4 pt-2">
+            {[...Array(3)].map((_, i) => (
               <div key={i} className="animate-pulse space-y-1.5">
                 <div className="flex justify-between">
                   <div className="h-3.5 w-16 bg-gray-100 rounded" />
@@ -725,46 +750,83 @@ export default function DashboardPage() {
               </div>
             ))}
           </div>
-        ) : monthlyCatSummary.length === 0 ? (
-          <div className="py-10 flex items-center justify-center text-gray-400 text-sm">
-            지출 내역이 없습니다.
-          </div>
-        ) : (
-          <div className="divide-y divide-gray-50">
-            {monthlyCatSummary.map(({ name, amount }, i) => {
-              const pct = Math.round((amount / maxAmount) * 100);
-              const color = CAT_COLORS[i % CAT_COLORS.length];
-              const sharePct = Math.round((amount / totalAmount) * 100);
-              return (
-                <button
-                  key={name}
-                  onClick={() => setSelectedCat(name)}
-                  className="w-full px-4 py-3 hover:bg-gray-50 transition-colors text-left"
-                >
-                  <div className="flex items-center justify-between mb-1.5">
-                    <div className="flex items-center gap-2">
-                      <span className="inline-block w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: color }} />
-                      <span className="text-sm font-medium text-gray-800">{name}</span>
-                      <span className="text-xs text-gray-400">{sharePct}%</span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <span className="text-sm font-semibold text-gray-800">{amount.toLocaleString('ko-KR')}원</span>
-                      <svg className="w-3.5 h-3.5 text-gray-300 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                      </svg>
-                    </div>
+        );
+      }
+      if (list.length === 0) {
+        return <p className="text-center text-gray-400 text-sm py-6">{emptyMsg}</p>;
+      }
+      return (
+        <div className="divide-y divide-gray-50">
+          {list.map(({ name, amount }, i) => {
+            const pct = Math.round((amount / max) * 100);
+            const color = type === 'EXPENSE' ? CAT_COLORS[i % CAT_COLORS.length] : ['#10b981', '#34d399', '#6ee7b7', '#059669', '#047857', '#065f46', '#d1fae5', '#a7f3d0'][i % 8];
+            const sharePct = Math.round((amount / total) * 100);
+            return (
+              <button key={name}
+                onClick={() => { setSelectedCatType(type); setSelectedCat(name); }}
+                className="w-full px-4 py-3 hover:bg-gray-50 transition-colors text-left">
+                <div className="flex items-center justify-between mb-1.5">
+                  <div className="flex items-center gap-2">
+                    <span className="inline-block w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: color }} />
+                    <span className="text-sm font-medium text-gray-800">{name}</span>
+                    <span className="text-xs text-gray-400">{sharePct}%</span>
                   </div>
-                  <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                    <div
-                      className="h-full rounded-full transition-all duration-500"
-                      style={{ width: `${pct}%`, backgroundColor: color }}
-                    />
+                  <div className="flex items-center gap-1">
+                    <span className="text-sm font-semibold text-gray-800">{amount.toLocaleString('ko-KR')}원</span>
+                    <svg className="w-3.5 h-3.5 text-gray-300 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                    </svg>
                   </div>
-                </button>
-              );
-            })}
+                </div>
+                <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                  <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct}%`, backgroundColor: color }} />
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      );
+    };
+
+    return (
+      <div className="space-y-4">
+        {/* 수입/지출 요약 카드 */}
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm px-4 py-3 flex justify-around">
+          <div className="text-center">
+            <p className="text-xs text-gray-400 mb-0.5">수입</p>
+            <p className="text-base font-bold text-emerald-600">{totalIncome.toLocaleString('ko-KR')}원</p>
           </div>
-        )}
+          <div className="w-px bg-gray-100" />
+          <div className="text-center">
+            <p className="text-xs text-gray-400 mb-0.5">지출</p>
+            <p className="text-base font-bold text-gray-800">{totalExpense.toLocaleString('ko-KR')}원</p>
+          </div>
+          <div className="w-px bg-gray-100" />
+          <div className="text-center">
+            <p className="text-xs text-gray-400 mb-0.5">순수지</p>
+            <p className={`text-base font-bold ${totalIncome - totalExpense >= 0 ? 'text-blue-600' : 'text-red-500'}`}>
+              {(totalIncome - totalExpense).toLocaleString('ko-KR')}원
+            </p>
+          </div>
+        </div>
+
+        {/* 지출 카테고리 */}
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+          <div className="px-4 pt-3 pb-2 flex items-center justify-between">
+            <p className="text-sm font-bold text-gray-700">{y}년 {m}월 지출</p>
+            {totalExpense > 0 && <p className="text-xs text-gray-400">합계 <span className="font-semibold text-gray-600">{totalExpense.toLocaleString('ko-KR')}원</span></p>}
+          </div>
+          {renderCatList(monthlyCatSummary, totalExpense, maxExpense, 'EXPENSE', '지출 내역이 없습니다.')}
+        </div>
+
+        {/* 수입 카테고리 */}
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+          <div className="px-4 pt-3 pb-2 flex items-center justify-between">
+            <p className="text-sm font-bold text-gray-700">{y}년 {m}월 수입</p>
+            {totalIncome > 0 && <p className="text-xs text-gray-400">합계 <span className="font-semibold text-emerald-600">{totalIncome.toLocaleString('ko-KR')}원</span></p>}
+          </div>
+          {renderCatList(monthlyIncomeSummary, totalIncome, maxIncome, 'INCOME', '수입 내역이 없습니다.')}
+        </div>
       </div>
     );
   };
