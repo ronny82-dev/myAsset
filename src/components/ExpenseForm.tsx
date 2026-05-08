@@ -202,9 +202,9 @@ const ExpenseForm = ({ assets, categories, onSubmit, onCategoryCreate }: Expense
   };
 
   const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value.replace(/,/g, '');
-    if (value === '') { setAmount(''); return; }
-    const numericValue = Number(value);
+    const raw = e.target.value.replace(/,/g, '');
+    if (raw === '' || raw === '-') { setAmount(raw); return; }
+    const numericValue = Number(raw);
     if (!isNaN(numericValue)) setAmount(numericValue.toLocaleString('ko-KR'));
   };
 

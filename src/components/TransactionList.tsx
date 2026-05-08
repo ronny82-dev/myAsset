@@ -292,7 +292,7 @@ export default function TransactionList() {
   const saveEdit = async (id: number) => {
     if (!editForm) return;
     const numericAmount = parseInt(editForm.amount.replace(/,/g, ''), 10);
-    if (isNaN(numericAmount) || numericAmount <= 0) { alert('유효한 금액을 입력하세요.'); return; }
+    if (isNaN(numericAmount) || numericAmount === 0) { alert('유효한 금액을 입력하세요.'); return; }
     setSaving(true);
 
     // 수정 전 원본 자산/월 기록 (캐시 무효화용)
@@ -338,9 +338,9 @@ export default function TransactionList() {
 
   const handleAmountInput = (val: string) => {
     const raw = val.replace(/,/g, '');
-    if (raw === '' || /^\d+$/.test(raw)) {
-      setEditForm((f) => f ? { ...f, amount: raw === '' ? '' : Number(raw).toLocaleString('ko-KR') } : f);
-    }
+    if (raw === '' || raw === '-') { setEditForm((f) => f ? { ...f, amount: raw } : f); return; }
+    const numericValue = Number(raw);
+    if (!isNaN(numericValue)) setEditForm((f) => f ? { ...f, amount: numericValue.toLocaleString('ko-KR') } : f);
   };
 
   // 정렬 토글: none→asc→desc→none

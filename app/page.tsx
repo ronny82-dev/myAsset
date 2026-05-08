@@ -91,7 +91,7 @@ export default function Home() {
     }
 
     const numericAmount = parseInt(data.amount.replace(/,/g, ''), 10);
-    if (isNaN(numericAmount) || numericAmount <= 0) {
+    if (isNaN(numericAmount) || numericAmount === 0) {
       toast.error('유효한 금액을 입력해주세요.');
       return;
     }
